@@ -3,18 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+          content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:;" />
     <title>deskPet</title>
     <link rel="stylesheet" href="styles/main.css" />
   </head>
   <body>
-    <div id="pet" class="pet pet--placeholder"></div>
+    <canvas id="pet" class="pet" width="256" height="256"></canvas>
 
+    <script src="scripts/animator.js"></script>
     <script>
       const pet = document.getElementById('pet');
+
       pet.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         window.deskPet?.showContextMenu();
+      });
+
+      const animator = new Animator(pet, { breed: 'shiba', action: 'idle' });
+      animator.load('idle').then(() => animator.start());
+
+      window.deskPet?.onFocusChange?.((focused) => {
+        animator.setFps(focused ? window.ANIMATOR_FPS.ACTIVE : window.ANIMATOR_FPS.IDLE);
       });
     </script>
   </body>
