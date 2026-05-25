@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+    <title>领养你的狗狗</title>
+    <link rel="stylesheet" href="styles/adopt.css" />
+  </head>
+  <body>
+    <main class="adopt">
+      <h1 class="adopt__title">领养一只属于你的狗狗</h1>
+      <p class="adopt__subtitle">先挑一个品种，给它起个名字，它就会一直陪着你</p>
+
+      <section class="adopt__section">
+        <h2 class="adopt__label">1 · 选品种</h2>
+        <div class="breeds" id="breeds"></div>
+      </section>
+
+      <section class="adopt__section">
+        <h2 class="adopt__label">2 · 选性别</h2>
+        <div class="genders">
+          <label class="gender">
+            <input type="radio" name="gender" value="male" />
+            <span class="gender__chip">公（狗子）</span>
+          </label>
+          <label class="gender">
+            <input type="radio" name="gender" value="female" />
+            <span class="gender__chip">母（狗妹）</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="adopt__section">
+        <h2 class="adopt__label">3 · 起名字</h2>
+        <input id="name" class="name" type="text" maxlength="8" placeholder="最多 8 个字" />
+      </section>
+
+      <button id="confirm" class="confirm" disabled>确 认 领 养</button>
+    </main>
+
+    <script src="scripts/adopt.js"></script>
+  </body>
+</html>

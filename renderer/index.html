@@ -12,19 +12,25 @@
 
     <script src="scripts/animator.js"></script>
     <script>
-      const pet = document.getElementById('pet');
+      (async () => {
+        const pet = document.getElementById('pet');
 
-      pet.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        window.deskPet?.showContextMenu();
-      });
+        pet.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          window.deskPet?.showContextMenu();
+        });
 
-      const animator = new Animator(pet, { breed: 'shiba', action: 'idle' });
-      animator.load('idle').then(() => animator.start());
+        const save = await window.deskPet?.getSave?.();
+        const breed = save?.dog?.breed || 'shiba';
 
-      window.deskPet?.onFocusChange?.((focused) => {
-        animator.setFps(focused ? window.ANIMATOR_FPS.ACTIVE : window.ANIMATOR_FPS.IDLE);
-      });
+        const animator = new Animator(pet, { breed, action: 'idle' });
+        await animator.load('idle');
+        animator.start();
+
+        window.deskPet?.onFocusChange?.((focused) => {
+          animator.setFps(focused ? window.ANIMATOR_FPS.ACTIVE : window.ANIMATOR_FPS.IDLE);
+        });
+      })();
     </script>
   </body>
 </html>
