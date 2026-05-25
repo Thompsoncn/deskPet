@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
+const save = require('./lib/save');
 
 const PET_WIN_SIZE = 256;
 
@@ -12,6 +13,7 @@ if (!gotLock) {
 
 let petWindow = null;
 let adoptWindow = null;
+let quittingAfterFlush = false;
 
 app.on('second-instance', () => {
   const win = petWindow || adoptWindow;
@@ -20,44 +22,6 @@ app.on('second-instance', () => {
     win.focus();
   }
 });
-
-// ---------------------- 临时存档（模块 4 替换） ----------------------
-
-const SAVE_PATH = () => path.join(app.getPath('userData'), 'savegame.json');
-
-async function readSave() {
-  try {
-    const raw = await fs.readFile(SAVE_PATH(), 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-async function writeSave(save) {
-  await fs.mkdir(path.dirname(SAVE_PATH()), { recursive: true });
-  await fs.writeFile(SAVE_PATH(), JSON.stringify(save, null, 2), 'utf8');
-}
-
-function buildInitialSave({ breed, gender, name }) {
-  return {
-    version: 1,
-    dog: {
-      breed,
-      gender,
-      name,
-      adoptedAt: new Date().toISOString(),
-      level: 1,
-      exp: 0,
-      mood: 'normal',
-      hunger: 80,
-    },
-    settings: { quietMode: false },
-    interactions: { lastFeedAt: null, lastPlayAt: null },
-    travel: { status: 'idle', departedAt: null, returnAt: null },
-    postcards: [],
-  };
-}
 
 // ---------------------- 主窗口（桌面狗狗） ----------------------
 
@@ -143,7 +107,9 @@ ipcMain.handle('count-frames', async (_event, breed, action) => {
   }
 });
 
-ipcMain.handle('get-save', async () => readSave());
+ipcMain.handle('get-save', () => save.getCache());
+
+ipcMain.handle('update-save', (_event, patch) => save.update(patch));
 
 ipcMain.handle('adopt-confirm', async (_event, payload) => {
   const breeds = ['shiba', 'corgi', 'golden', 'husky', 'teddy', 'zhongtian'];
@@ -154,8 +120,8 @@ ipcMain.handle('adopt-confirm', async (_event, payload) => {
   const name = String(payload.name || '').trim().slice(0, 8);
   if (!name) return { ok: false, error: 'empty name' };
 
-  const save = buildInitialSave({ breed: payload.breed, gender: payload.gender, name });
-  await writeSave(save);
+  save.setCache(save.buildInitialSave({ breed: payload.breed, gender: payload.gender, name }));
+  await save.flush();
 
   if (adoptWindow) adoptWindow.close();
   createPetWindow();
@@ -165,12 +131,23 @@ ipcMain.handle('adopt-confirm', async (_event, payload) => {
 // ---------------------- 启动流程 ----------------------
 
 app.whenReady().then(async () => {
-  const existing = await readSave();
+  const existing = await save.load();
   if (existing && existing.dog && existing.dog.breed) {
     createPetWindow();
   } else {
     createAdoptWindow();
   }
+});
+
+// 退出前 flush，避免数据丢失（PRD 第 8 章「不丢档」红线）
+app.on('before-quit', (event) => {
+  if (quittingAfterFlush) return;
+  if (!save.hasPendingWrite()) return;
+  event.preventDefault();
+  save.flush().finally(() => {
+    quittingAfterFlush = true;
+    app.quit();
+  });
 });
 
 app.on('window-all-closed', () => {
