@@ -1,0 +1,18 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+
+# 本地存档（开发期不入库）
+savegame.json
+data-local/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# 构建产物
+release/
+build/

@@ -1,0 +1,51 @@
+{
+  "name": "deskpet",
+  "version": "0.1.0",
+  "description": "陪伴你、会去旅行、会寄明信片的桌面宠物狗",
+  "main": "main.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Thompsoncn/deskPet.git"
+  },
+  "keywords": [
+    "electron",
+    "desktop-pet",
+    "windows"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Thompsoncn/deskPet/issues"
+  },
+  "homepage": "https://github.com/Thompsoncn/deskPet#readme",
+  "build": {
+    "appId": "com.deskpet.app",
+    "productName": "deskPet",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*",
+      "data/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    }
+  },
+  "devDependencies": {
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1"
+  }
+}
