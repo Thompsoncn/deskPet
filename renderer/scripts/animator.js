@@ -5,7 +5,7 @@
  *   - 'frames'：从 assets/breeds/{breed}/{action}/frame_NNN.png 加载真帧并按 fps 切换
  *   - 'procedural'：没有真帧时退化为画布上画的占位狗（橙色圆 + 呼吸缩放）
  *
- * Module 3 接管后，breed 从存档读取；当前默认 'shiba'。
+ * 模块 5 起新增 playTransient：播放瞬态动作（eat/play）若干毫秒后自动回到 idle。
  */
 
 const FRAME_PATH = (breed, action, idx) =>
@@ -23,12 +23,14 @@ class Animator {
     this.fps = FPS_ACTIVE;
     this.tick = 0;
     this.timer = null;
+    this.transientTimer = null;
     this.mode = 'procedural';
     this.frames = [];
   }
 
   async load(action = this.action) {
     this.action = action;
+    this.tick = 0;
     const count = await window.deskPet.countFrames(this.breed, action);
     if (count > 0) {
       this.frames = await this._preloadImages(count);
@@ -66,6 +68,21 @@ class Animator {
     if (this.timer) this.start();
   }
 
+  /**
+   * 播放瞬态动作（如喂食/玩耍）若干毫秒后自动回到 idle。
+   * 多次调用会取消前一次的计时器并切换到新动作。
+   */
+  async playTransient(action, durationMs = 2500) {
+    if (this.transientTimer) clearTimeout(this.transientTimer);
+    await this.load(action);
+    this.start();
+    this.transientTimer = setTimeout(async () => {
+      this.transientTimer = null;
+      await this.load('idle');
+      this.start();
+    }, durationMs);
+  }
+
   _render() {
     this.tick++;
     if (this.mode === 'frames' && this.frames.length > 0) {
@@ -89,14 +106,20 @@ class Animator {
     ctx.clearRect(0, 0, W, H);
 
     const t = this.tick / this.fps;
-    const breathScale = 1 + 0.04 * Math.sin(t * 2);
+    // 动作不同时呼吸节奏不同，给瞬态动作一点视觉差异
+    const speed = this.action === 'play' ? 6 : this.action === 'eat' ? 4 : 2;
+    const amp = this.action === 'play' ? 0.08 : 0.04;
+    const breathScale = 1 + amp * Math.sin(t * speed);
     const cx = W / 2;
     const cy = H / 2;
     const r = 90 * breathScale;
 
+    const colorTop = this.action === 'play' ? '#ffd166' : this.action === 'eat' ? '#ff9a76' : '#ffb88c';
+    const colorBot = this.action === 'play' ? '#ff7676' : this.action === 'eat' ? '#e76f51' : '#ff7676';
+
     const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-    grad.addColorStop(0, '#ffb88c');
-    grad.addColorStop(1, '#ff7676');
+    grad.addColorStop(0, colorTop);
+    grad.addColorStop(1, colorBot);
 
     ctx.fillStyle = grad;
     ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
@@ -119,7 +142,15 @@ class Animator {
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(cx, cy + 14, 10, 0, Math.PI);
+    if (this.action === 'eat') {
+      // 张开的嘴
+      ctx.arc(cx, cy + 16, 12, 0.1, Math.PI - 0.1);
+    } else if (this.action === 'play') {
+      // 大笑：U 型嘴
+      ctx.arc(cx, cy + 12, 14, 0, Math.PI);
+    } else {
+      ctx.arc(cx, cy + 14, 10, 0, Math.PI);
+    }
     ctx.stroke();
   }
 }

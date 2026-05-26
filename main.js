@@ -5,6 +5,15 @@ const save = require('./lib/save');
 
 const PET_WIN_SIZE = 256;
 
+// 互动规则（模块 6 接管完整数值系统时可抽离到独立常量模块）
+// hunger 字段语义：饱腹度（0=极饿、100=极饱）。喂食上升、随时间下降。
+const INTERACTION_COOLDOWN_MS = 60_000;
+const FEED_HUNGER_DELTA = 20;
+const FEED_EXP_DELTA = 3;
+const PLAY_EXP_DELTA = 10;
+const HUNGER_MAX = 100;
+const ACTION_DURATION_MS = 2500;
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -81,10 +90,76 @@ function createAdoptWindow() {
   adoptWindow.on('closed', () => { adoptWindow = null; });
 }
 
+// ---------------------- 互动 ----------------------
+
+function isOnCooldown(lastAt) {
+  if (!lastAt) return false;
+  return Date.now() - new Date(lastAt).getTime() < INTERACTION_COOLDOWN_MS;
+}
+
+function cooldownSecondsLeft(lastAt) {
+  if (!lastAt) return 0;
+  const left = INTERACTION_COOLDOWN_MS - (Date.now() - new Date(lastAt).getTime());
+  return Math.max(0, Math.ceil(left / 1000));
+}
+
+function clamp(n, lo, hi) {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function triggerFeed() {
+  const cache = save.getCache();
+  if (!cache) return;
+  if (isOnCooldown(cache.interactions.lastFeedAt)) return;
+
+  const nowIso = new Date().toISOString();
+  save.update({
+    'dog.hunger': clamp((cache.dog.hunger ?? 0) + FEED_HUNGER_DELTA, 0, HUNGER_MAX),
+    'dog.exp': (cache.dog.exp ?? 0) + FEED_EXP_DELTA,
+    'interactions.lastFeedAt': nowIso,
+  });
+  broadcastPetAction({ type: 'eat', durationMs: ACTION_DURATION_MS });
+}
+
+function triggerPlay() {
+  const cache = save.getCache();
+  if (!cache) return;
+  if (isOnCooldown(cache.interactions.lastPlayAt)) return;
+
+  const nowIso = new Date().toISOString();
+  save.update({
+    'dog.mood': 'happy',
+    'dog.exp': (cache.dog.exp ?? 0) + PLAY_EXP_DELTA,
+    'interactions.lastPlayAt': nowIso,
+  });
+  broadcastPetAction({ type: 'play', durationMs: ACTION_DURATION_MS });
+}
+
+function broadcastPetAction(payload) {
+  if (petWindow) petWindow.webContents.send('pet-action', payload);
+}
+
 // ---------------------- 右键菜单 ----------------------
 
 function buildContextMenu() {
+  const cache = save.getCache();
+  const lastFeed = cache?.interactions?.lastFeedAt;
+  const lastPlay = cache?.interactions?.lastPlayAt;
+  const feedLeft = cooldownSecondsLeft(lastFeed);
+  const playLeft = cooldownSecondsLeft(lastPlay);
+
   return Menu.buildFromTemplate([
+    {
+      label: feedLeft > 0 ? `喂食（${feedLeft}s 后可用）` : '喂食',
+      enabled: feedLeft === 0,
+      click: () => triggerFeed(),
+    },
+    {
+      label: playLeft > 0 ? `玩耍（${playLeft}s 后可用）` : '玩耍',
+      enabled: playLeft === 0,
+      click: () => triggerPlay(),
+    },
+    { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ]);
 }
@@ -139,7 +214,6 @@ app.whenReady().then(async () => {
   }
 });
 
-// 退出前 flush，避免数据丢失（PRD 第 8 章「不丢档」红线）
 app.on('before-quit', (event) => {
   if (quittingAfterFlush) return;
   if (!save.hasPendingWrite()) return;

@@ -6,6 +6,7 @@ html, body {
   background: transparent;
   overflow: hidden;
   user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .pet {
@@ -20,4 +21,26 @@ html, body {
 
 .pet:active {
   cursor: grabbing;
+}
+
+.badge {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translate(-50%, -8px);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4a3c2e;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(180, 140, 100, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.badge--show {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }

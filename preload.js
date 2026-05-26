@@ -11,4 +11,9 @@ contextBridge.exposeInMainWorld('deskPet', {
     ipcRenderer.on('window-focus', listener);
     return () => ipcRenderer.removeListener('window-focus', listener);
   },
+  onPetAction: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('pet-action', listener);
+    return () => ipcRenderer.removeListener('pet-action', listener);
+  },
 });
