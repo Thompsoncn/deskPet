@@ -24,8 +24,9 @@
 
         const save = await window.deskPet?.getSave?.();
         const breed = save?.dog?.breed || 'shiba';
+        const initialMood = save?.dog?.mood || 'normal';
 
-        const animator = new Animator(pet, { breed, action: 'idle' });
+        const animator = new Animator(pet, { breed, action: 'idle', mood: initialMood });
         await animator.load('idle');
         animator.start();
 
@@ -34,18 +35,32 @@
         });
 
         let badgeTimer = null;
-        const BADGE_LABELS = { eat: '正在进食…', play: '在玩耍…' };
+        const BADGE_LABELS = {
+          eat: '正在进食…',
+          play: '在玩耍…',
+        };
+
+        function showBadge(text, durationMs) {
+          badge.textContent = text;
+          badge.classList.add('badge--show');
+          if (badgeTimer) clearTimeout(badgeTimer);
+          badgeTimer = setTimeout(() => badge.classList.remove('badge--show'), durationMs);
+        }
 
         window.deskPet?.onPetAction?.((payload) => {
           if (!payload?.type) return;
-          const label = BADGE_LABELS[payload.type] || '';
-          if (label) {
-            badge.textContent = label;
-            badge.classList.add('badge--show');
-            if (badgeTimer) clearTimeout(badgeTimer);
-            badgeTimer = setTimeout(() => badge.classList.remove('badge--show'), payload.durationMs || 2500);
+          if (payload.type === 'levelup') {
+            showBadge(`升级！Lv ${payload.level}`, payload.durationMs || 2500);
+            animator.playTransient('levelup', payload.durationMs || 2500);
+            return;
           }
+          const label = BADGE_LABELS[payload.type];
+          if (label) showBadge(label, payload.durationMs || 2500);
           animator.playTransient(payload.type, payload.durationMs || 2500);
+        });
+
+        window.deskPet?.onPetState?.((payload) => {
+          if (payload?.mood) animator.setMood(payload.mood);
         });
       })();
     </script>

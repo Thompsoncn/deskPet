@@ -3,9 +3,10 @@
  *
  * 两种渲染模式：
  *   - 'frames'：从 assets/breeds/{breed}/{action}/frame_NNN.png 加载真帧并按 fps 切换
- *   - 'procedural'：没有真帧时退化为画布上画的占位狗（橙色圆 + 呼吸缩放）
+ *   - 'procedural'：没有真帧时退化为画布上画的占位狗
  *
- * 模块 5 起新增 playTransient：播放瞬态动作（eat/play）若干毫秒后自动回到 idle。
+ * 模块 5 起：playTransient 播放瞬态动作（eat/play/levelup）后自动回 idle
+ * 模块 6 起：setMood 切换情绪，procedural 模式按情绪上色（happy/hungry/bored/wantsToTravel/normal）
  */
 
 const FRAME_PATH = (breed, action, idx) =>
@@ -14,12 +15,22 @@ const FRAME_PATH = (breed, action, idx) =>
 const FPS_ACTIVE = 10;
 const FPS_IDLE = 4;
 
+// 占位狗的情绪配色（PNG 帧到位后这些不会被用到）
+const MOOD_COLORS = {
+  happy:          { top: '#ffd166', bot: '#ff7676', breath: { speed: 3, amp: 0.06 } },
+  normal:         { top: '#ffb88c', bot: '#ff7676', breath: { speed: 2, amp: 0.04 } },
+  hungry:         { top: '#d4a373', bot: '#a0826d', breath: { speed: 1.2, amp: 0.025 } },
+  bored:          { top: '#b8b3ad', bot: '#8a857f', breath: { speed: 1, amp: 0.02 } },
+  wantsToTravel:  { top: '#a8d8ea', bot: '#7eb9d2', breath: { speed: 1.6, amp: 0.035 } },
+};
+
 class Animator {
-  constructor(canvas, { breed = 'shiba', action = 'idle' } = {}) {
+  constructor(canvas, { breed = 'shiba', action = 'idle', mood = 'normal' } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.breed = breed;
     this.action = action;
+    this.mood = mood;
     this.fps = FPS_ACTIVE;
     this.tick = 0;
     this.timer = null;
@@ -68,10 +79,10 @@ class Animator {
     if (this.timer) this.start();
   }
 
-  /**
-   * 播放瞬态动作（如喂食/玩耍）若干毫秒后自动回到 idle。
-   * 多次调用会取消前一次的计时器并切换到新动作。
-   */
+  setMood(mood) {
+    if (mood && MOOD_COLORS[mood]) this.mood = mood;
+  }
+
   async playTransient(action, durationMs = 2500) {
     if (this.transientTimer) clearTimeout(this.transientTimer);
     await this.load(action);
@@ -106,20 +117,21 @@ class Animator {
     ctx.clearRect(0, 0, W, H);
 
     const t = this.tick / this.fps;
-    // 动作不同时呼吸节奏不同，给瞬态动作一点视觉差异
-    const speed = this.action === 'play' ? 6 : this.action === 'eat' ? 4 : 2;
-    const amp = this.action === 'play' ? 0.08 : 0.04;
-    const breathScale = 1 + amp * Math.sin(t * speed);
+
+    // 颜色与呼吸节奏：瞬态动作（eat/play/levelup）覆盖情绪配色
+    let palette = MOOD_COLORS[this.mood] || MOOD_COLORS.normal;
+    if (this.action === 'play') palette = { top: '#ffd166', bot: '#ff7676', breath: { speed: 6, amp: 0.08 } };
+    else if (this.action === 'eat') palette = { top: '#ff9a76', bot: '#e76f51', breath: { speed: 4, amp: 0.06 } };
+    else if (this.action === 'levelup') palette = { top: '#ffe066', bot: '#f4a261', breath: { speed: 8, amp: 0.1 } };
+
+    const breathScale = 1 + palette.breath.amp * Math.sin(t * palette.breath.speed);
     const cx = W / 2;
     const cy = H / 2;
     const r = 90 * breathScale;
 
-    const colorTop = this.action === 'play' ? '#ffd166' : this.action === 'eat' ? '#ff9a76' : '#ffb88c';
-    const colorBot = this.action === 'play' ? '#ff7676' : this.action === 'eat' ? '#e76f51' : '#ff7676';
-
     const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-    grad.addColorStop(0, colorTop);
-    grad.addColorStop(1, colorBot);
+    grad.addColorStop(0, palette.top);
+    grad.addColorStop(1, palette.bot);
 
     ctx.fillStyle = grad;
     ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
@@ -128,30 +140,70 @@ class Animator {
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fill();
-
     ctx.shadowColor = 'transparent';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    const blinkPhase = Math.floor(t) % 6;
-    const eyeOpen = blinkPhase !== 5;
+
+    // 眼睛：眨眼频率随情绪
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+    const blinkCycle = this.mood === 'bored' ? 4 : 6;
+    const blinkPhase = Math.floor(t) % blinkCycle;
+    const eyeOpen = blinkPhase !== (blinkCycle - 1);
     const eyeR = eyeOpen ? 6 : 1.5;
+    // hungry / bored 眼神往下
+    const eyeDy = (this.mood === 'hungry' || this.mood === 'bored') ? -6 : -12;
     ctx.beginPath();
-    ctx.arc(cx - 22, cy - 12, eyeR, 0, Math.PI * 2);
-    ctx.arc(cx + 22, cy - 12, eyeR, 0, Math.PI * 2);
+    ctx.arc(cx - 22, cy + eyeDy, eyeR, 0, Math.PI * 2);
+    ctx.arc(cx + 22, cy + eyeDy, eyeR, 0, Math.PI * 2);
     ctx.fill();
 
+    // 嘴型：按 action 或 mood 调整
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     if (this.action === 'eat') {
-      // 张开的嘴
       ctx.arc(cx, cy + 16, 12, 0.1, Math.PI - 0.1);
-    } else if (this.action === 'play') {
-      // 大笑：U 型嘴
+    } else if (this.action === 'play' || this.mood === 'happy') {
       ctx.arc(cx, cy + 12, 14, 0, Math.PI);
+    } else if (this.mood === 'hungry' || this.mood === 'bored') {
+      // 倒微笑
+      ctx.arc(cx, cy + 24, 10, Math.PI, 0);
     } else {
       ctx.arc(cx, cy + 14, 10, 0, Math.PI);
     }
     ctx.stroke();
+
+    // levelup：星星粒子
+    if (this.action === 'levelup') {
+      this._drawSparkles(ctx, cx, cy, t);
+    }
+  }
+
+  _drawSparkles(ctx, cx, cy, t) {
+    const count = 6;
+    ctx.fillStyle = '#fff7c0';
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + t * 2;
+      const dist = 100 + Math.sin(t * 3 + i) * 6;
+      const sx = cx + Math.cos(angle) * dist;
+      const sy = cy + Math.sin(angle) * dist;
+      const size = 4 + Math.abs(Math.sin(t * 4 + i)) * 3;
+      this._star(ctx, sx, sy, size);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  _star(ctx, x, y, r) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      const rr = i % 2 === 0 ? r : r * 0.45;
+      const px = x + Math.cos(a) * rr;
+      const py = y + Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
   }
 }
 

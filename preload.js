@@ -16,4 +16,9 @@ contextBridge.exposeInMainWorld('deskPet', {
     ipcRenderer.on('pet-action', listener);
     return () => ipcRenderer.removeListener('pet-action', listener);
   },
+  onPetState: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('pet-state-changed', listener);
+    return () => ipcRenderer.removeListener('pet-state-changed', listener);
+  },
 });
