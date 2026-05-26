@@ -9,6 +9,29 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
+/* 顶部 104px 给气泡，底部 256px 给画布 */
+.bubble-area {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 104px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding-bottom: 12px;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.pet-area {
+  position: absolute;
+  top: 104px;
+  left: 0;
+  width: 256px;
+  height: 256px;
+}
+
 .pet {
   position: absolute;
   left: 0;
@@ -23,11 +46,12 @@ html, body {
   cursor: grabbing;
 }
 
+/* 状态徽标：浮在狗狗头顶上方 */
 .badge {
   position: absolute;
-  top: 8px;
+  top: 6px;
   left: 50%;
-  transform: translate(-50%, -8px);
+  transform: translate(-50%, -6px);
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 600;
@@ -38,9 +62,50 @@ html, body {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.25s ease, transform 0.25s ease;
+  z-index: 2;
 }
 
 .badge--show {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+/* 主动搭话气泡 */
+.bubble {
+  position: relative;
+  max-width: 220px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #4a3c2e;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(120, 90, 60, 0.22);
+  text-align: center;
+  white-space: normal;
+  word-break: break-word;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+.bubble--show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 气泡尾巴：底部中央向下的小三角 */
+.bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid #ffffff;
+  filter: drop-shadow(0 2px 1px rgba(120, 90, 60, 0.12));
 }

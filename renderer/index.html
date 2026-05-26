@@ -8,14 +8,20 @@
     <link rel="stylesheet" href="styles/main.css" />
   </head>
   <body>
-    <canvas id="pet" class="pet" width="256" height="256"></canvas>
-    <div id="badge" class="badge"></div>
+    <div class="bubble-area">
+      <div id="bubble" class="bubble"></div>
+    </div>
+    <div class="pet-area">
+      <div id="badge" class="badge"></div>
+      <canvas id="pet" class="pet" width="256" height="256"></canvas>
+    </div>
 
     <script src="scripts/animator.js"></script>
     <script>
       (async () => {
         const pet = document.getElementById('pet');
         const badge = document.getElementById('badge');
+        const bubble = document.getElementById('bubble');
 
         pet.addEventListener('contextmenu', (e) => {
           e.preventDefault();
@@ -35,17 +41,22 @@
         });
 
         let badgeTimer = null;
-        const BADGE_LABELS = {
-          eat: '正在进食…',
-          play: '在玩耍…',
-        };
-
         function showBadge(text, durationMs) {
           badge.textContent = text;
           badge.classList.add('badge--show');
           if (badgeTimer) clearTimeout(badgeTimer);
           badgeTimer = setTimeout(() => badge.classList.remove('badge--show'), durationMs);
         }
+
+        let bubbleTimer = null;
+        function showBubble(text, durationMs) {
+          bubble.textContent = text;
+          bubble.classList.add('bubble--show');
+          if (bubbleTimer) clearTimeout(bubbleTimer);
+          bubbleTimer = setTimeout(() => bubble.classList.remove('bubble--show'), durationMs);
+        }
+
+        const BADGE_LABELS = { eat: '正在进食…', play: '在玩耍…' };
 
         window.deskPet?.onPetAction?.((payload) => {
           if (!payload?.type) return;
@@ -61,6 +72,10 @@
 
         window.deskPet?.onPetState?.((payload) => {
           if (payload?.mood) animator.setMood(payload.mood);
+        });
+
+        window.deskPet?.onPetSpeak?.((payload) => {
+          if (payload?.text) showBubble(payload.text, payload.durationMs || 4500);
         });
       })();
     </script>

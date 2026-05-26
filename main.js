@@ -3,8 +3,10 @@ const path = require('path');
 const fs = require('fs').promises;
 const save = require('./lib/save');
 const stats = require('./lib/stats');
+const speech = require('./lib/speech');
 
-const PET_WIN_SIZE = 256;
+const PET_WIN_WIDTH = 256;
+const PET_WIN_HEIGHT = 360; // 顶部 104px 留给气泡，底部 256px 是狗狗画布
 
 const INTERACTION_COOLDOWN_MS = 60_000;
 const FEED_HUNGER_DELTA = 20;
@@ -13,6 +15,7 @@ const PLAY_EXP_DELTA = 10;
 const ACTION_DURATION_MS = 2500;
 const LEVELUP_ANIM_MS = 2500;
 const TICK_INTERVAL_MS = 60_000;
+const BUBBLE_VISIBLE_MS = 4500;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -24,6 +27,7 @@ let petWindow = null;
 let adoptWindow = null;
 let quittingAfterFlush = false;
 let tickTimer = null;
+let speechTimer = null;
 let lastTickMs = Date.now();
 
 app.on('second-instance', () => {
@@ -38,12 +42,12 @@ app.on('second-instance', () => {
 
 function createPetWindow() {
   const { workArea } = screen.getPrimaryDisplay();
-  const x = workArea.x + workArea.width - PET_WIN_SIZE - 32;
-  const y = workArea.y + workArea.height - PET_WIN_SIZE - 32;
+  const x = workArea.x + workArea.width - PET_WIN_WIDTH - 32;
+  const y = workArea.y + workArea.height - PET_WIN_HEIGHT - 32;
 
   petWindow = new BrowserWindow({
-    width: PET_WIN_SIZE,
-    height: PET_WIN_SIZE,
+    width: PET_WIN_WIDTH,
+    height: PET_WIN_HEIGHT,
     x,
     y,
     transparent: true,
@@ -68,9 +72,11 @@ function createPetWindow() {
   petWindow.on('closed', () => {
     petWindow = null;
     stopTick();
+    stopSpeech();
   });
 
   startTick();
+  startSpeech();
 }
 
 // ---------------------- 领养窗口 ----------------------
@@ -129,6 +135,60 @@ function onTick() {
   if (moodChanged) broadcastPetState();
 }
 
+// ---------------------- 主动搭话 ----------------------
+
+function startSpeech() {
+  stopSpeech();
+  const delay = speech.initialDelayMs();
+  speechTimer = setTimeout(tryToSpeak, delay);
+}
+
+function stopSpeech() {
+  if (speechTimer) clearTimeout(speechTimer);
+  speechTimer = null;
+}
+
+function rescheduleSpeech(delayOverrideMs) {
+  if (speechTimer) clearTimeout(speechTimer);
+  speechTimer = setTimeout(tryToSpeak, delayOverrideMs ?? speech.nextDelayMs());
+}
+
+function tryToSpeak() {
+  const cache = save.getCache();
+  if (!cache) {
+    rescheduleSpeech();
+    return;
+  }
+  const quietMode = !!cache.settings?.quietMode;
+  if (!speech.canSpeak({ quietMode })) {
+    rescheduleSpeech();
+    return;
+  }
+  const text = speech.pickLine({ mood: cache.dog.mood, breed: cache.dog.breed });
+  if (text) {
+    speech.recordSpoken();
+    broadcastPetSpeak(text);
+  }
+  rescheduleSpeech();
+}
+
+function speakEvent(eventName) {
+  const cache = save.getCache();
+  if (!cache) return;
+  if (cache.settings?.quietMode) return;
+  const text = speech.getEventLine(eventName);
+  if (!text) return;
+  // 事件类不受 15min 间隔限制，但计入每日上限，避免疯狂事件刷屏
+  speech.recordSpoken();
+  broadcastPetSpeak(text);
+}
+
+function broadcastPetSpeak(text) {
+  if (petWindow) {
+    petWindow.webContents.send('pet-speak', { text, durationMs: BUBBLE_VISIBLE_MS });
+  }
+}
+
 // ---------------------- 互动 ----------------------
 
 function isOnCooldown(lastAt) {
@@ -145,7 +205,6 @@ function cooldownSecondsLeft(lastAt) {
 function triggerInteraction(kind) {
   const cache = save.getCache();
   if (!cache) return;
-
   const lastAt = kind === 'eat' ? cache.interactions.lastFeedAt : cache.interactions.lastPlayAt;
   if (isOnCooldown(lastAt)) return;
 
@@ -158,7 +217,6 @@ function triggerInteraction(kind) {
     : cache.dog.hunger;
 
   const draftDog = { ...cache.dog, ...expResult, hunger: newHunger };
-  // 玩耍直接抬到 happy；喂食仍走标准状态机（吃完不一定开心，可能仍饿）
   const newMood = kind === 'play'
     ? 'happy'
     : stats.computeMood({ ...cache, dog: draftDog, interactions: { ...cache.interactions, lastFeedAt: nowIso } });
@@ -173,12 +231,12 @@ function triggerInteraction(kind) {
   };
   if (kind === 'eat') patch['interactions.lastFeedAt'] = nowIso;
   else patch['interactions.lastPlayAt'] = nowIso;
-
   save.update(patch);
 
   broadcastPetAction({ type: kind, durationMs: ACTION_DURATION_MS });
   if (expResult.leveledUp) {
     broadcastPetAction({ type: 'levelup', level: expResult.level, durationMs: LEVELUP_ANIM_MS });
+    speakEvent('levelUp');
   }
   broadcastPetState();
 }
@@ -195,6 +253,7 @@ function broadcastPetState() {
     level: cache.dog.level,
     exp: cache.dog.exp,
     hunger: cache.dog.hunger,
+    quietMode: !!cache.settings?.quietMode,
   });
 }
 
@@ -204,6 +263,7 @@ function buildContextMenu() {
   const cache = save.getCache();
   const feedLeft = cooldownSecondsLeft(cache?.interactions?.lastFeedAt);
   const playLeft = cooldownSecondsLeft(cache?.interactions?.lastPlayAt);
+  const quiet = !!cache?.settings?.quietMode;
 
   return Menu.buildFromTemplate([
     {
@@ -215,6 +275,16 @@ function buildContextMenu() {
       label: playLeft > 0 ? `玩耍（${playLeft}s 后可用）` : '玩耍',
       enabled: playLeft === 0,
       click: () => triggerInteraction('play'),
+    },
+    { type: 'separator' },
+    {
+      label: '安静模式',
+      type: 'checkbox',
+      checked: quiet,
+      click: () => {
+        save.update({ 'settings.quietMode': !quiet });
+        broadcastPetState();
+      },
     },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
