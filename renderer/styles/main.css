@@ -88,6 +88,12 @@ html, body {
   cursor: grab;
 }
 
+/* HTML hidden 属性的 display:none 会被 .away 的 display:flex 覆盖，
+   显式还原优先级，否则 idle 状态下也会显示「去旅行了」占位盖住 canvas */
+.away[hidden] {
+  display: none !important;
+}
+
 .away__icon {
   font-size: 32px;
   filter: grayscale(0.2);
