@@ -275,6 +275,7 @@ function startTravel() {
   const durationMs = travel.randomDurationMs();
   const now = Date.now();
   const returnAt = new Date(now + durationMs);
+  console.log(`[travel] departing to ${destination.id}, return in ${Math.round(durationMs / 1000)}s`);
 
   save.update({
     'travel.status': 'departing',
@@ -307,6 +308,7 @@ function scheduleTravelStateTimer(fn, delayMs) {
 async function generatePostcardAndArrive(destination) {
   const cache = save.getCache();
   if (!cache) return;
+  console.log(`[travel] arriving from ${destination.id}`);
 
   const line = travel.pickLineFor(destination) || `${destination.name}真好玩！`;
   const dateStr = formatLocalDate(new Date());
