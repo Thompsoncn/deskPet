@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "description": "陪伴你、会去旅行、会寄明信片的桌面宠物狗",
   "main": "main.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis"
+    "start:dev": "DESKPET_DEV=1 electron .",
+    "make-icon": "node scripts/make-icon.js",
+    "dist": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac",
+    "dist:dir": "electron-builder --dir"
   },
   "repository": {
     "type": "git",
@@ -29,19 +30,46 @@
   "build": {
     "appId": "com.deskpet.app",
     "productName": "deskPet",
+    "copyright": "Copyright © 2026 deskPet",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "main.js",
       "preload.js",
+      "lib/**/*",
       "renderer/**/*",
       "assets/**/*",
-      "data/**/*"
+      "data/**/*",
+      "!**/*.md",
+      "!**/.DS_Store"
     ],
+    "asar": true,
+    "compression": "maximum",
     "win": {
       "target": "nsis",
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.png",
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "deskPet",
+      "installerLanguages": ["zh_CN"],
+      "language": "2052"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.png",
+      "category": "public.app-category.entertainment"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png",
+      "category": "Game"
     }
   },
   "devDependencies": {
