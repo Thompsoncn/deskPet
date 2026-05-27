@@ -1,12 +1,13 @@
-const { app, BrowserWindow, Menu, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, screen, Notification, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const save = require('./lib/save');
 const stats = require('./lib/stats');
 const speech = require('./lib/speech');
+const travel = require('./lib/travel');
 
 const PET_WIN_WIDTH = 256;
-const PET_WIN_HEIGHT = 360; // 顶部 104px 留给气泡，底部 256px 是狗狗画布
+const PET_WIN_HEIGHT = 360;
 
 const INTERACTION_COOLDOWN_MS = 60_000;
 const FEED_HUNGER_DELTA = 20;
@@ -17,6 +18,10 @@ const LEVELUP_ANIM_MS = 2500;
 const TICK_INTERVAL_MS = 60_000;
 const BUBBLE_VISIBLE_MS = 4500;
 
+const DEPARTING_HOLD_MS = 5_000;  // departing 阶段持续时间
+const ARRIVING_HOLD_MS = 5_000;   // arriving 阶段持续时间
+const TRAVEL_EXP_GAIN = 25;       // 旅行归来奖励
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -25,13 +30,16 @@ if (!gotLock) {
 
 let petWindow = null;
 let adoptWindow = null;
+let albumWindow = null;
 let quittingAfterFlush = false;
 let tickTimer = null;
 let speechTimer = null;
+let travelCheckTimer = null;
+let travelStateTimer = null;
 let lastTickMs = Date.now();
 
 app.on('second-instance', () => {
-  const win = petWindow || adoptWindow;
+  const win = petWindow || adoptWindow || albumWindow;
   if (win) {
     if (win.isMinimized()) win.restore();
     win.focus();
@@ -73,10 +81,17 @@ function createPetWindow() {
     petWindow = null;
     stopTick();
     stopSpeech();
+    stopTravelCheck();
   });
 
-  startTick();
-  startSpeech();
+  // 启动时若上次崩溃在 away 状态，恢复后立刻判定是否该归来
+  petWindow.webContents.on('did-finish-load', () => {
+    resumeTravelIfMidFlight();
+    startTick();
+    startSpeech();
+    startTravelCheck();
+    broadcastPetState();
+  });
 }
 
 // ---------------------- 领养窗口 ----------------------
@@ -97,10 +112,32 @@ function createAdoptWindow() {
       nodeIntegration: false,
     },
   });
-
   adoptWindow.setMenuBarVisibility(false);
   adoptWindow.loadFile(path.join(__dirname, 'renderer/adopt.html'));
   adoptWindow.on('closed', () => { adoptWindow = null; });
+}
+
+// ---------------------- 相册窗口 ----------------------
+
+function openAlbumWindow() {
+  if (albumWindow) {
+    albumWindow.focus();
+    return;
+  }
+  albumWindow = new BrowserWindow({
+    width: 960,
+    height: 720,
+    title: '明信片相册',
+    backgroundColor: '#fefcf3',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  albumWindow.setMenuBarVisibility(false);
+  albumWindow.loadFile(path.join(__dirname, 'renderer/postcard.html'));
+  albumWindow.on('closed', () => { albumWindow = null; });
 }
 
 // ---------------------- 1 分钟 tick：饥饿 + 情绪 ----------------------
@@ -119,6 +156,9 @@ function stopTick() {
 function onTick() {
   const cache = save.getCache();
   if (!cache) return;
+  // 旅行中不衰减饥饿（狗狗在外面自己吃），也不强行换情绪
+  if (cache.travel?.status && cache.travel.status !== 'idle') return;
+
   const nowMs = Date.now();
   const minutesPassed = (nowMs - lastTickMs) / 60_000;
   lastTickMs = nowMs;
@@ -128,10 +168,7 @@ function onTick() {
   const newMood = stats.computeMood(draftSave, nowMs);
 
   const moodChanged = cache.dog.mood !== newMood;
-  save.update({
-    'dog.hunger': newHunger,
-    'dog.mood': newMood,
-  });
+  save.update({ 'dog.hunger': newHunger, 'dog.mood': newMood });
   if (moodChanged) broadcastPetState();
 }
 
@@ -139,8 +176,7 @@ function onTick() {
 
 function startSpeech() {
   stopSpeech();
-  const delay = speech.initialDelayMs();
-  speechTimer = setTimeout(tryToSpeak, delay);
+  speechTimer = setTimeout(tryToSpeak, speech.initialDelayMs());
 }
 
 function stopSpeech() {
@@ -156,6 +192,11 @@ function rescheduleSpeech(delayOverrideMs) {
 function tryToSpeak() {
   const cache = save.getCache();
   if (!cache) {
+    rescheduleSpeech();
+    return;
+  }
+  // 旅行中不主动说话（狗狗不在桌面）
+  if (cache.travel?.status === 'away') {
     rescheduleSpeech();
     return;
   }
@@ -178,15 +219,217 @@ function speakEvent(eventName) {
   if (cache.settings?.quietMode) return;
   const text = speech.getEventLine(eventName);
   if (!text) return;
-  // 事件类不受 15min 间隔限制，但计入每日上限，避免疯狂事件刷屏
   speech.recordSpoken();
   broadcastPetSpeak(text);
 }
 
 function broadcastPetSpeak(text) {
-  if (petWindow) {
-    petWindow.webContents.send('pet-speak', { text, durationMs: BUBBLE_VISIBLE_MS });
+  if (petWindow) petWindow.webContents.send('pet-speak', { text, durationMs: BUBBLE_VISIBLE_MS });
+}
+
+// ---------------------- 旅行 ----------------------
+
+function startTravelCheck() {
+  stopTravelCheck();
+  travelCheckTimer = setInterval(checkTravelTrigger, travel.checkIntervalMs());
+}
+
+function stopTravelCheck() {
+  if (travelCheckTimer) clearInterval(travelCheckTimer);
+  travelCheckTimer = null;
+}
+
+function checkTravelTrigger() {
+  const cache = save.getCache();
+  if (!cache) return;
+  if (!travel.shouldTriggerTravel(cache)) return;
+  startTravel();
+}
+
+function startTravel() {
+  const cache = save.getCache();
+  if (!cache || cache.travel?.status !== 'idle') return;
+
+  const destination = travel.pickDestination();
+  if (!destination) return;
+
+  const durationMs = travel.randomDurationMs();
+  const now = Date.now();
+  const returnAt = new Date(now + durationMs);
+
+  save.update({
+    'travel.status': 'departing',
+    'travel.destination': destination.id,
+    'travel.departedAt': new Date(now).toISOString(),
+    'travel.returnAt': returnAt.toISOString(),
+  });
+  broadcastPetState();
+
+  speakEvent('travelStart');
+
+  // departing → away
+  scheduleTravelStateTimer(() => {
+    save.update({ 'travel.status': 'away' });
+    broadcastPetState();
+    // 安排归来
+    const remain = returnAt.getTime() - Date.now();
+    scheduleTravelStateTimer(() => generatePostcardAndArrive(destination), Math.max(0, remain));
+  }, DEPARTING_HOLD_MS);
+}
+
+function scheduleTravelStateTimer(fn, delayMs) {
+  if (travelStateTimer) clearTimeout(travelStateTimer);
+  travelStateTimer = setTimeout(() => {
+    travelStateTimer = null;
+    fn();
+  }, delayMs);
+}
+
+async function generatePostcardAndArrive(destination) {
+  const cache = save.getCache();
+  if (!cache) return;
+
+  const line = travel.pickLineFor(destination) || `${destination.name}真好玩！`;
+  const dateStr = formatLocalDate(new Date());
+  const postcard = await renderAndSavePostcard({
+    destination,
+    breed: cache.dog.breed,
+    dogName: cache.dog.name,
+    line,
+    dateStr,
+  });
+  if (!postcard) {
+    console.warn('[travel] postcard generation failed, returning without postcard');
   }
+
+  // 把明信片入相册
+  const existing = save.getCache()?.postcards || [];
+  const next = postcard ? [...existing, postcard] : existing;
+
+  save.update({
+    'postcards': next,
+    'travel.status': 'arriving',
+  });
+  broadcastPetState();
+
+  // 系统通知
+  if (Notification.isSupported()) {
+    const n = new Notification({
+      title: '狗狗寄明信片回来啦',
+      body: `来自${destination.name}：${line}`,
+      silent: false,
+    });
+    n.on('click', () => openAlbumWindow());
+    n.show();
+  }
+
+  speakEvent('travelEnd');
+
+  // arriving → idle，发放奖励
+  scheduleTravelStateTimer(() => {
+    const c = save.getCache();
+    if (!c) return;
+    const expResult = stats.applyExpGain(c.dog, TRAVEL_EXP_GAIN);
+    save.update({
+      'travel.status': 'idle',
+      'travel.lastReturnAt': new Date().toISOString(),
+      'travel.destination': null,
+      'travel.departedAt': null,
+      'travel.returnAt': null,
+      'dog.mood': 'happy',
+      'dog.exp': expResult.exp,
+      'dog.level': expResult.level,
+      'dog.dailyExp': expResult.dailyExp,
+      'dog.dailyExpDate': expResult.dailyExpDate,
+    });
+    broadcastPetState();
+    if (expResult.leveledUp) {
+      broadcastPetAction({ type: 'levelup', level: expResult.level, durationMs: LEVELUP_ANIM_MS });
+      speakEvent('levelUp');
+    }
+  }, ARRIVING_HOLD_MS);
+}
+
+function resumeTravelIfMidFlight() {
+  const cache = save.getCache();
+  if (!cache) return;
+  const status = cache.travel?.status;
+  if (!status || status === 'idle') return;
+
+  const destination = travel.findDestination(cache.travel.destination);
+  if (!destination) {
+    // 数据异常，重置
+    save.update({ 'travel.status': 'idle' });
+    return;
+  }
+
+  if (status === 'departing') {
+    // 直接接续到 away
+    save.update({ 'travel.status': 'away' });
+    const returnAt = cache.travel.returnAt ? new Date(cache.travel.returnAt).getTime() : Date.now();
+    const remain = Math.max(0, returnAt - Date.now());
+    scheduleTravelStateTimer(() => generatePostcardAndArrive(destination), remain);
+  } else if (status === 'away') {
+    const returnAt = cache.travel.returnAt ? new Date(cache.travel.returnAt).getTime() : Date.now();
+    const remain = returnAt - Date.now();
+    if (remain <= 0) {
+      generatePostcardAndArrive(destination);
+    } else {
+      scheduleTravelStateTimer(() => generatePostcardAndArrive(destination), remain);
+    }
+  } else if (status === 'arriving') {
+    // 异常状态，立刻回 idle
+    save.update({
+      'travel.status': 'idle',
+      'travel.lastReturnAt': new Date().toISOString(),
+    });
+  }
+}
+
+async function renderAndSavePostcard({ destination, breed, dogName, line, dateStr }) {
+  if (!petWindow) return null;
+  try {
+    const payload = JSON.stringify({
+      destination,
+      breed,
+      dogName,
+      line,
+      dateStr,
+      watermark: 'deskPet',
+    });
+    const dataURL = await petWindow.webContents.executeJavaScript(
+      `window.deskPetPostcard.render(${payload})`,
+      true,
+    );
+    if (!dataURL || typeof dataURL !== 'string') return null;
+
+    const base64 = dataURL.replace(/^data:image\/png;base64,/, '');
+    const buf = Buffer.from(base64, 'base64');
+    const id = `postcard_${Date.now()}`;
+    const dir = path.join(app.getPath('userData'), 'postcards');
+    await fs.mkdir(dir, { recursive: true });
+    const filename = `${id}.png`;
+    await fs.writeFile(path.join(dir, filename), buf);
+
+    return {
+      id,
+      destinationId: destination.id,
+      destinationName: destination.name,
+      line,
+      createdAt: new Date().toISOString(),
+      filename,
+    };
+  } catch (err) {
+    console.error('[travel] render postcard failed:', err);
+    return null;
+  }
+}
+
+function formatLocalDate(now = new Date()) {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}.${m}.${d}`;
 }
 
 // ---------------------- 互动 ----------------------
@@ -205,6 +448,9 @@ function cooldownSecondsLeft(lastAt) {
 function triggerInteraction(kind) {
   const cache = save.getCache();
   if (!cache) return;
+  // 旅行中无法互动
+  if (cache.travel?.status && cache.travel.status !== 'idle') return;
+
   const lastAt = kind === 'eat' ? cache.interactions.lastFeedAt : cache.interactions.lastPlayAt;
   if (isOnCooldown(lastAt)) return;
 
@@ -254,6 +500,8 @@ function broadcastPetState() {
     exp: cache.dog.exp,
     hunger: cache.dog.hunger,
     quietMode: !!cache.settings?.quietMode,
+    travelStatus: cache.travel?.status || 'idle',
+    travelDestination: cache.travel?.destination || null,
   });
 }
 
@@ -264,19 +512,25 @@ function buildContextMenu() {
   const feedLeft = cooldownSecondsLeft(cache?.interactions?.lastFeedAt);
   const playLeft = cooldownSecondsLeft(cache?.interactions?.lastPlayAt);
   const quiet = !!cache?.settings?.quietMode;
+  const traveling = cache?.travel?.status && cache.travel.status !== 'idle';
+  const postcardCount = (cache?.postcards || []).length;
 
-  return Menu.buildFromTemplate([
+  const items = [
     {
-      label: feedLeft > 0 ? `喂食（${feedLeft}s 后可用）` : '喂食',
-      enabled: feedLeft === 0,
+      label: traveling ? '喂食（旅行中）' : (feedLeft > 0 ? `喂食（${feedLeft}s 后可用）` : '喂食'),
+      enabled: !traveling && feedLeft === 0,
       click: () => triggerInteraction('eat'),
     },
     {
-      label: playLeft > 0 ? `玩耍（${playLeft}s 后可用）` : '玩耍',
-      enabled: playLeft === 0,
+      label: traveling ? '玩耍（旅行中）' : (playLeft > 0 ? `玩耍（${playLeft}s 后可用）` : '玩耍'),
+      enabled: !traveling && playLeft === 0,
       click: () => triggerInteraction('play'),
     },
     { type: 'separator' },
+    {
+      label: `明信片相册${postcardCount > 0 ? `（${postcardCount}）` : ''}`,
+      click: () => openAlbumWindow(),
+    },
     {
       label: '安静模式',
       type: 'checkbox',
@@ -286,9 +540,21 @@ function buildContextMenu() {
         broadcastPetState();
       },
     },
-    { type: 'separator' },
-    { label: '退出', click: () => app.quit() },
-  ]);
+  ];
+
+  if (travel.isDev()) {
+    items.push({ type: 'separator' });
+    items.push({
+      label: '[DEV] 立刻去旅行',
+      enabled: !traveling,
+      click: () => startTravel(),
+    });
+  }
+
+  items.push({ type: 'separator' });
+  items.push({ label: '退出', click: () => app.quit() });
+
+  return Menu.buildFromTemplate(items);
 }
 
 ipcMain.on('show-context-menu', (event) => {
@@ -327,6 +593,49 @@ ipcMain.handle('adopt-confirm', async (_event, payload) => {
 
   if (adoptWindow) adoptWindow.close();
   createPetWindow();
+  return { ok: true };
+});
+
+ipcMain.handle('list-postcards', async () => {
+  const cache = save.getCache();
+  const list = cache?.postcards || [];
+  const dir = path.join(app.getPath('userData'), 'postcards');
+  const out = [];
+  for (const p of list) {
+    try {
+      const buf = await fs.readFile(path.join(dir, p.filename));
+      const dataURL = `data:image/png;base64,${buf.toString('base64')}`;
+      out.push({ ...p, dataURL });
+    } catch {
+      // 文件丢失就跳过
+    }
+  }
+  // 倒序：新明信片在前
+  return out.reverse();
+});
+
+ipcMain.handle('save-postcard-as', async (event, id) => {
+  const cache = save.getCache();
+  const p = (cache?.postcards || []).find((x) => x.id === id);
+  if (!p) return { ok: false, error: 'not found' };
+  const srcPath = path.join(app.getPath('userData'), 'postcards', p.filename);
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const res = await dialog.showSaveDialog(win, {
+    title: '保存明信片',
+    defaultPath: `${p.destinationName}_${p.createdAt.slice(0, 10)}.png`,
+    filters: [{ name: 'PNG 图片', extensions: ['png'] }],
+  });
+  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+  try {
+    await fs.copyFile(srcPath, res.filePath);
+    return { ok: true, path: res.filePath };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-album', () => {
+  openAlbumWindow();
   return { ok: true };
 });
 

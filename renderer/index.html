@@ -11,22 +11,34 @@
     <div class="bubble-area">
       <div id="bubble" class="bubble"></div>
     </div>
-    <div class="pet-area">
+    <div class="pet-area" id="pet-area">
       <div id="badge" class="badge"></div>
       <canvas id="pet" class="pet" width="256" height="256"></canvas>
+      <div id="away" class="away" hidden>
+        <div class="away__icon">✈</div>
+        <div class="away__text">去旅行了…</div>
+      </div>
     </div>
 
     <script src="scripts/animator.js"></script>
+    <script src="scripts/postcard.js"></script>
     <script>
       (async () => {
         const pet = document.getElementById('pet');
         const badge = document.getElementById('badge');
         const bubble = document.getElementById('bubble');
+        const away = document.getElementById('away');
+        const petArea = document.getElementById('pet-area');
 
-        pet.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          window.deskPet?.showContextMenu();
-        });
+        // 右键菜单：canvas 或 away 占位都可触发
+        function bindContextMenu(el) {
+          el.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            window.deskPet?.showContextMenu();
+          });
+        }
+        bindContextMenu(pet);
+        bindContextMenu(away);
 
         const save = await window.deskPet?.getSave?.();
         const breed = save?.dog?.breed || 'shiba';
@@ -35,6 +47,9 @@
         const animator = new Animator(pet, { breed, action: 'idle', mood: initialMood });
         await animator.load('idle');
         animator.start();
+
+        // 启动时若已在旅行中，立刻进入对应可视状态
+        applyTravelStatus(save?.travel?.status || 'idle');
 
         window.deskPet?.onFocusChange?.((focused) => {
           animator.setFps(focused ? window.ANIMATOR_FPS.ACTIVE : window.ANIMATOR_FPS.IDLE);
@@ -56,6 +71,18 @@
           bubbleTimer = setTimeout(() => bubble.classList.remove('bubble--show'), durationMs);
         }
 
+        function applyTravelStatus(status) {
+          // away 显示占位，其它状态显示狗狗
+          const isAway = status === 'away';
+          if (isAway) {
+            pet.style.display = 'none';
+            away.hidden = false;
+          } else {
+            pet.style.display = '';
+            away.hidden = true;
+          }
+        }
+
         const BADGE_LABELS = { eat: '正在进食…', play: '在玩耍…' };
 
         window.deskPet?.onPetAction?.((payload) => {
@@ -72,6 +99,7 @@
 
         window.deskPet?.onPetState?.((payload) => {
           if (payload?.mood) animator.setMood(payload.mood);
+          if (payload?.travelStatus) applyTravelStatus(payload.travelStatus);
         });
 
         window.deskPet?.onPetSpeak?.((payload) => {

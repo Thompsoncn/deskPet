@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:;" />
+    <title>明信片相册</title>
+    <link rel="stylesheet" href="styles/postcard.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1 class="header__title">明信片相册</h1>
+      <p class="header__subtitle" id="subtitle">…</p>
+    </header>
+
+    <main class="grid" id="grid"></main>
+
+    <div class="empty" id="empty" hidden>
+      <p>还没有明信片哦～</p>
+      <p class="empty__hint">狗狗下次出去玩，会寄一张回来。</p>
+    </div>
+
+    <div class="modal" id="modal" hidden>
+      <button class="modal__close" id="modal-close" aria-label="关闭">×</button>
+      <div class="modal__inner">
+        <img class="modal__image" id="modal-image" alt="" />
+        <div class="modal__bar">
+          <div class="modal__meta" id="modal-meta"></div>
+          <button class="modal__save" id="modal-save">保存为图片</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="scripts/album.js"></script>
+  </body>
+</html>
