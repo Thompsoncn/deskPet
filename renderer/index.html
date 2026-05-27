@@ -23,14 +23,41 @@
     <script src="scripts/animator.js"></script>
     <script src="scripts/postcard.js"></script>
     <script>
+      // ---- 状态容器（late binding：监听器可能在 animator/helpers 创建前就被触发）----
+      let animator = null;
+      let applyTravelStatusFn = null;
+      let showBadgeFn = null;
+      let showBubbleFn = null;
+      const BADGE_LABELS = { eat: '正在进食…', play: '在玩耍…' };
+
+      // ---- 监听器在脚本同步段就注册，避免与主进程的初始化广播竞态 ----
+      window.deskPet?.onPetAction?.((payload) => {
+        if (!payload?.type) return;
+        if (payload.type === 'levelup') {
+          showBadgeFn?.(`升级！Lv ${payload.level}`, payload.durationMs || 2500);
+          animator?.playTransient('levelup', payload.durationMs || 2500);
+          return;
+        }
+        const label = BADGE_LABELS[payload.type];
+        if (label) showBadgeFn?.(label, payload.durationMs || 2500);
+        animator?.playTransient(payload.type, payload.durationMs || 2500);
+      });
+
+      window.deskPet?.onPetState?.((payload) => {
+        if (payload?.mood) animator?.setMood(payload.mood);
+        if (payload?.travelStatus) applyTravelStatusFn?.(payload.travelStatus);
+      });
+
+      window.deskPet?.onPetSpeak?.((payload) => {
+        if (payload?.text) showBubbleFn?.(payload.text, payload.durationMs || 4500);
+      });
+
       (async () => {
         const pet = document.getElementById('pet');
         const badge = document.getElementById('badge');
         const bubble = document.getElementById('bubble');
         const away = document.getElementById('away');
-        const petArea = document.getElementById('pet-area');
 
-        // 右键菜单：canvas 或 away 占位都可触发
         function bindContextMenu(el) {
           el.addEventListener('contextmenu', (e) => {
             e.preventDefault();
@@ -40,71 +67,48 @@
         bindContextMenu(pet);
         bindContextMenu(away);
 
+        applyTravelStatusFn = function (status) {
+          const isAway = status === 'away';
+          pet.style.display = isAway ? 'none' : '';
+          away.hidden = !isAway;
+        };
+
+        let badgeTimer = null;
+        showBadgeFn = function (text, durationMs) {
+          badge.textContent = text;
+          badge.classList.add('badge--show');
+          if (badgeTimer) clearTimeout(badgeTimer);
+          badgeTimer = setTimeout(() => badge.classList.remove('badge--show'), durationMs);
+        };
+
+        let bubbleTimer = null;
+        showBubbleFn = function (text, durationMs) {
+          bubble.textContent = text;
+          bubble.classList.add('bubble--show');
+          if (bubbleTimer) clearTimeout(bubbleTimer);
+          bubbleTimer = setTimeout(() => bubble.classList.remove('bubble--show'), durationMs);
+        };
+
         const save = await window.deskPet?.getSave?.();
         const breed = save?.dog?.breed || 'shiba';
         const initialMood = save?.dog?.mood || 'normal';
 
-        const animator = new Animator(pet, { breed, action: 'idle', mood: initialMood });
+        animator = new Animator(pet, { breed, action: 'idle', mood: initialMood });
         await animator.load('idle');
         animator.start();
 
-        // 启动时若已在旅行中，立刻进入对应可视状态
-        applyTravelStatus(save?.travel?.status || 'idle');
+        applyTravelStatusFn(save?.travel?.status || 'idle');
 
         window.deskPet?.onFocusChange?.((focused) => {
           animator.setFps(focused ? window.ANIMATOR_FPS.ACTIVE : window.ANIMATOR_FPS.IDLE);
         });
 
-        let badgeTimer = null;
-        function showBadge(text, durationMs) {
-          badge.textContent = text;
-          badge.classList.add('badge--show');
-          if (badgeTimer) clearTimeout(badgeTimer);
-          badgeTimer = setTimeout(() => badge.classList.remove('badge--show'), durationMs);
+        // 重新拉一次状态：setup 期间主进程可能已经把 away 转走（resumeTravelIfMidFlight）
+        const freshSave = await window.deskPet?.getSave?.();
+        if (freshSave) {
+          if (freshSave.dog?.mood) animator.setMood(freshSave.dog.mood);
+          applyTravelStatusFn(freshSave.travel?.status || 'idle');
         }
-
-        let bubbleTimer = null;
-        function showBubble(text, durationMs) {
-          bubble.textContent = text;
-          bubble.classList.add('bubble--show');
-          if (bubbleTimer) clearTimeout(bubbleTimer);
-          bubbleTimer = setTimeout(() => bubble.classList.remove('bubble--show'), durationMs);
-        }
-
-        function applyTravelStatus(status) {
-          // away 显示占位，其它状态显示狗狗
-          const isAway = status === 'away';
-          if (isAway) {
-            pet.style.display = 'none';
-            away.hidden = false;
-          } else {
-            pet.style.display = '';
-            away.hidden = true;
-          }
-        }
-
-        const BADGE_LABELS = { eat: '正在进食…', play: '在玩耍…' };
-
-        window.deskPet?.onPetAction?.((payload) => {
-          if (!payload?.type) return;
-          if (payload.type === 'levelup') {
-            showBadge(`升级！Lv ${payload.level}`, payload.durationMs || 2500);
-            animator.playTransient('levelup', payload.durationMs || 2500);
-            return;
-          }
-          const label = BADGE_LABELS[payload.type];
-          if (label) showBadge(label, payload.durationMs || 2500);
-          animator.playTransient(payload.type, payload.durationMs || 2500);
-        });
-
-        window.deskPet?.onPetState?.((payload) => {
-          if (payload?.mood) animator.setMood(payload.mood);
-          if (payload?.travelStatus) applyTravelStatus(payload.travelStatus);
-        });
-
-        window.deskPet?.onPetSpeak?.((payload) => {
-          if (payload?.text) showBubble(payload.text, payload.durationMs || 4500);
-        });
       })();
     </script>
   </body>

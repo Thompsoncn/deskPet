@@ -84,13 +84,16 @@ function createPetWindow() {
     stopTravelCheck();
   });
 
-  // 启动时若上次崩溃在 away 状态，恢复后立刻判定是否该归来
+  // 启动时若上次崩溃在 away 状态，恢复后立刻判定是否该归来。
+  // 延迟 200ms 启动以确保渲染端 IPC 监听器已注册（避免初始广播被丢）
   petWindow.webContents.on('did-finish-load', () => {
-    resumeTravelIfMidFlight();
-    startTick();
-    startSpeech();
-    startTravelCheck();
-    broadcastPetState();
+    setTimeout(() => {
+      resumeTravelIfMidFlight();
+      startTick();
+      startSpeech();
+      startTravelCheck();
+      broadcastPetState();
+    }, 200);
   });
 }
 
@@ -358,8 +361,15 @@ function resumeTravelIfMidFlight() {
 
   const destination = travel.findDestination(cache.travel.destination);
   if (!destination) {
-    // 数据异常，重置
-    save.update({ 'travel.status': 'idle' });
+    // 数据异常（destination 丢失或无效），清回 idle
+    console.warn('[travel] resume: invalid destination, resetting to idle');
+    save.update({
+      'travel.status': 'idle',
+      'travel.destination': null,
+      'travel.departedAt': null,
+      'travel.returnAt': null,
+    });
+    broadcastPetState();
     return;
   }
 
