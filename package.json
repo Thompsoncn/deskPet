@@ -4,12 +4,13 @@
   "description": "陪伴你、会去旅行、会寄明信片的桌面宠物狗",
   "main": "main.js",
   "scripts": {
+    "postinstall": "cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node node_modules/electron/install.js",
     "start": "electron .",
-    "start:dev": "DESKPET_DEV=1 electron .",
+    "start:dev": "cross-env DESKPET_DEV=1 electron .",
     "make-icon": "node scripts/make-icon.js",
-    "dist": "electron-builder --win nsis",
-    "dist:mac": "electron-builder --mac",
-    "dist:dir": "electron-builder --dir"
+    "dist": "cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win nsis",
+    "dist:mac": "cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --mac",
+    "dist:dir": "cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --dir"
   },
   "repository": {
     "type": "git",
@@ -58,7 +59,9 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "deskPet",
-      "installerLanguages": ["zh_CN"],
+      "installerLanguages": [
+        "zh_CN"
+      ],
       "language": "2052"
     },
     "mac": {
@@ -73,6 +76,7 @@
     }
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "electron": "^42.2.0",
     "electron-builder": "^26.8.1"
   }

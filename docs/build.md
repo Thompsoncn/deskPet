@@ -6,8 +6,31 @@
 
 - Node.js LTS（项目验证过 v22 / v24）
 - 已 `npm install`，`node_modules/` 就绪
-- 应用图标：占位图标已通过 `npm run make-icon` 生成在 `assets/icon.png`。
-  正式发布前替换为美术正式版本（同样命名 `assets/icon.png`，256×256 PNG 即可，electron-builder 会自动转 `.ico` / `.icns`）。
+- 应用图标：占位图标已通过 `npm run make-icon` 生成在 `assets/icon.png`（512×512）。
+  正式发布前替换为美术正式版本（同样命名 `assets/icon.png`，≥ 512×512 PNG 即可，electron-builder 会自动转 `.ico` / `.icns`；mac 要求至少 512）。
+
+## 网络（中国大陆必看）
+
+GitHub release 在大陆经常拉不下来，项目已经做了三件事让国内开箱即用：
+
+1. **`.npmrc`** 把 npm 主仓库切到 `registry.npmmirror.com`
+2. **`package.json` 的 `postinstall`** 用 `cross-env ELECTRON_MIRROR=...` 强制走淘宝的 electron 镜像
+3. **`dist*` 系列脚本** 用 `cross-env ELECTRON_BUILDER_BINARIES_MIRROR=...` 让 electron-builder 拉 winCodeSign / nsis-resources 时也走镜像
+
+正常情况：
+```bash
+npm install   # 自动触发 postinstall 把 Electron 二进制下到 node_modules/electron/dist/
+```
+
+如果 postinstall 失败（比如断网中途）：
+```bash
+rm -rf node_modules/electron
+npm install electron@42.2.0
+# 或者手动：
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node node_modules/electron/install.js
+```
+
+校验下载好没：`ls node_modules/electron/dist/` 应该看到 `Electron.app`（macOS）或 `electron.exe`（Windows）。
 
 ## 打包命令
 
