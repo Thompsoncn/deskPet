@@ -249,6 +249,22 @@ function checkTravelTrigger() {
   startTravel();
 }
 
+function forceEndTravel() {
+  if (travelStateTimer) {
+    clearTimeout(travelStateTimer);
+    travelStateTimer = null;
+  }
+  save.update({
+    'travel.status': 'idle',
+    'travel.destination': null,
+    'travel.departedAt': null,
+    'travel.returnAt': null,
+    'travel.lastReturnAt': new Date().toISOString(),
+    'dog.mood': 'normal',
+  });
+  broadcastPetState();
+}
+
 function startTravel() {
   const cache = save.getCache();
   if (!cache || cache.travel?.status !== 'idle') return;
@@ -558,6 +574,11 @@ function buildContextMenu() {
       label: '[DEV] 立刻去旅行',
       enabled: !traveling,
       click: () => startTravel(),
+    });
+    items.push({
+      label: '[DEV] 强制结束旅行（救援）',
+      enabled: !!traveling,
+      click: () => forceEndTravel(),
     });
   }
 

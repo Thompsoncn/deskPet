@@ -23,72 +23,68 @@
     <script src="scripts/animator.js"></script>
     <script src="scripts/postcard.js"></script>
     <script>
-      // ---- 状态容器（late binding：监听器可能在 animator/helpers 创建前就被触发）----
+      // ---- DOM refs（script 在 body 末尾，所有元素一定已存在）----
+      const pet = document.getElementById('pet');
+      const badge = document.getElementById('badge');
+      const bubble = document.getElementById('bubble');
+      const away = document.getElementById('away');
+
+      // ---- 同步 helpers，监听器触发时一定可用 ----
+      function applyTravelStatus(status) {
+        const isAway = status === 'away';
+        pet.style.display = isAway ? 'none' : '';
+        away.hidden = !isAway;
+      }
+
+      let badgeTimer = null;
+      function showBadge(text, durationMs) {
+        badge.textContent = text;
+        badge.classList.add('badge--show');
+        if (badgeTimer) clearTimeout(badgeTimer);
+        badgeTimer = setTimeout(() => badge.classList.remove('badge--show'), durationMs);
+      }
+
+      let bubbleTimer = null;
+      function showBubble(text, durationMs) {
+        bubble.textContent = text;
+        bubble.classList.add('bubble--show');
+        if (bubbleTimer) clearTimeout(bubbleTimer);
+        bubbleTimer = setTimeout(() => bubble.classList.remove('bubble--show'), durationMs);
+      }
+
+      // 全局右键监听，避免 -webkit-app-region: drag 吞掉 contextmenu 事件
+      document.body.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        window.deskPet?.showContextMenu();
+      });
+
       let animator = null;
-      let applyTravelStatusFn = null;
-      let showBadgeFn = null;
-      let showBubbleFn = null;
       const BADGE_LABELS = { eat: '正在进食…', play: '在玩耍…' };
 
-      // ---- 监听器在脚本同步段就注册，避免与主进程的初始化广播竞态 ----
+      // ---- IPC 监听器同步注册（避免与主进程初始化广播竞态）----
       window.deskPet?.onPetAction?.((payload) => {
         if (!payload?.type) return;
         if (payload.type === 'levelup') {
-          showBadgeFn?.(`升级！Lv ${payload.level}`, payload.durationMs || 2500);
+          showBadge(`升级！Lv ${payload.level}`, payload.durationMs || 2500);
           animator?.playTransient('levelup', payload.durationMs || 2500);
           return;
         }
         const label = BADGE_LABELS[payload.type];
-        if (label) showBadgeFn?.(label, payload.durationMs || 2500);
+        if (label) showBadge(label, payload.durationMs || 2500);
         animator?.playTransient(payload.type, payload.durationMs || 2500);
       });
 
       window.deskPet?.onPetState?.((payload) => {
         if (payload?.mood) animator?.setMood(payload.mood);
-        if (payload?.travelStatus) applyTravelStatusFn?.(payload.travelStatus);
+        if (payload?.travelStatus) applyTravelStatus(payload.travelStatus);
       });
 
       window.deskPet?.onPetSpeak?.((payload) => {
-        if (payload?.text) showBubbleFn?.(payload.text, payload.durationMs || 4500);
+        if (payload?.text) showBubble(payload.text, payload.durationMs || 4500);
       });
 
+      // ---- 异步：只 animator 初始化要等 IPC + 帧加载 ----
       (async () => {
-        const pet = document.getElementById('pet');
-        const badge = document.getElementById('badge');
-        const bubble = document.getElementById('bubble');
-        const away = document.getElementById('away');
-
-        function bindContextMenu(el) {
-          el.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            window.deskPet?.showContextMenu();
-          });
-        }
-        bindContextMenu(pet);
-        bindContextMenu(away);
-
-        applyTravelStatusFn = function (status) {
-          const isAway = status === 'away';
-          pet.style.display = isAway ? 'none' : '';
-          away.hidden = !isAway;
-        };
-
-        let badgeTimer = null;
-        showBadgeFn = function (text, durationMs) {
-          badge.textContent = text;
-          badge.classList.add('badge--show');
-          if (badgeTimer) clearTimeout(badgeTimer);
-          badgeTimer = setTimeout(() => badge.classList.remove('badge--show'), durationMs);
-        };
-
-        let bubbleTimer = null;
-        showBubbleFn = function (text, durationMs) {
-          bubble.textContent = text;
-          bubble.classList.add('bubble--show');
-          if (bubbleTimer) clearTimeout(bubbleTimer);
-          bubbleTimer = setTimeout(() => bubble.classList.remove('bubble--show'), durationMs);
-        };
-
         const save = await window.deskPet?.getSave?.();
         const breed = save?.dog?.breed || 'shiba';
         const initialMood = save?.dog?.mood || 'normal';
@@ -97,17 +93,17 @@
         await animator.load('idle');
         animator.start();
 
-        applyTravelStatusFn(save?.travel?.status || 'idle');
+        applyTravelStatus(save?.travel?.status || 'idle');
 
         window.deskPet?.onFocusChange?.((focused) => {
           animator.setFps(focused ? window.ANIMATOR_FPS.ACTIVE : window.ANIMATOR_FPS.IDLE);
         });
 
-        // 重新拉一次状态：setup 期间主进程可能已经把 away 转走（resumeTravelIfMidFlight）
+        // 二次拉取：setup 期间主进程可能已经转走过状态
         const freshSave = await window.deskPet?.getSave?.();
         if (freshSave) {
           if (freshSave.dog?.mood) animator.setMood(freshSave.dog.mood);
-          applyTravelStatusFn(freshSave.travel?.status || 'idle');
+          applyTravelStatus(freshSave.travel?.status || 'idle');
         }
       })();
     </script>
