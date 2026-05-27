@@ -8,6 +8,7 @@
     "start": "electron .",
     "start:dev": "cross-env DESKPET_DEV=1 electron .",
     "make-icon": "node scripts/make-icon.js",
+    "reset-travel": "node scripts/reset-travel.js",
     "dist": "cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win nsis",
     "dist:mac": "cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --mac",
     "dist:dir": "cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --dir"
