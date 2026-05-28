@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('deskPet', {
   listPostcards: () => ipcRenderer.invoke('list-postcards'),
   savePostcardAs: (id) => ipcRenderer.invoke('save-postcard-as', id),
   openAlbum: () => ipcRenderer.invoke('open-album'),
+  feed: () => ipcRenderer.invoke('action-feed'),
+  play: () => ipcRenderer.invoke('action-play'),
+  triggerTravel: () => ipcRenderer.invoke('action-travel'),
+  endTravel: () => ipcRenderer.invoke('action-end-travel'),
   onFocusChange: (handler) => {
     const listener = (_event, focused) => handler(focused);
     ipcRenderer.on('window-focus', listener);

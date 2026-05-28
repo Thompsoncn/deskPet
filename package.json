@@ -9,6 +9,9 @@
     "start:dev": "cross-env DESKPET_DEV=1 electron .",
     "make-icon": "node scripts/make-icon.js",
     "reset-travel": "node scripts/reset-travel.js",
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "playwright test",
     "dist": "cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win nsis",
     "dist:mac": "cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --mac",
     "dist:dir": "cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --dir"
@@ -77,6 +80,7 @@
     }
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "cross-env": "^10.1.0",
     "electron": "^42.2.0",
     "electron-builder": "^26.8.1"

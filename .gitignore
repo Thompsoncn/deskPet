@@ -16,3 +16,8 @@ data-local/
 # 构建产物
 release/
 build/
+
+# 测试产物
+test-results/
+playwright-report/
+.playwright/

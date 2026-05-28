@@ -18,9 +18,15 @@ const LEVELUP_ANIM_MS = 2500;
 const TICK_INTERVAL_MS = 60_000;
 const BUBBLE_VISIBLE_MS = 4500;
 
-const DEPARTING_HOLD_MS = 5_000;  // departing 阶段持续时间
-const ARRIVING_HOLD_MS = 5_000;   // arriving 阶段持续时间
+const IS_TEST = process.env.DESKPET_TEST === '1';
+const DEPARTING_HOLD_MS = IS_TEST ? 200 : 5_000;  // departing 阶段持续时间
+const ARRIVING_HOLD_MS = IS_TEST ? 200 : 5_000;   // arriving 阶段持续时间
 const TRAVEL_EXP_GAIN = 25;       // 旅行归来奖励
+
+// 测试隔离：DESKPET_USERDATA 指定独立的存档目录，避免污染真实存档
+if (process.env.DESKPET_USERDATA) {
+  app.setPath('userData', process.env.DESKPET_USERDATA);
+}
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -74,6 +80,14 @@ function createPetWindow() {
   });
 
   petWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
+
+  // DEV / TEST 模式把渲染端日志转发到终端，方便排错
+  if (process.env.DESKPET_DEV === '1' || process.env.DESKPET_TEST === '1') {
+    petWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      const tag = ['[V]', '[I]', '[W]', '[E]'][level] || '[?]';
+      console.log(`[renderer]${tag} ${message}`);
+    });
+  }
 
   petWindow.on('focus', () => petWindow.webContents.send('window-focus', true));
   petWindow.on('blur', () => petWindow.webContents.send('window-focus', false));
@@ -671,6 +685,12 @@ ipcMain.handle('open-album', () => {
   openAlbumWindow();
   return { ok: true };
 });
+
+// 动作 IPC：菜单项的程序化入口，也供 E2E 测试驱动
+ipcMain.handle('action-feed', () => { triggerInteraction('eat'); return save.getCache(); });
+ipcMain.handle('action-play', () => { triggerInteraction('play'); return save.getCache(); });
+ipcMain.handle('action-travel', () => { startTravel(); return save.getCache(); });
+ipcMain.handle('action-end-travel', () => { forceEndTravel(); return save.getCache(); });
 
 // ---------------------- 启动 / 退出 ----------------------
 
