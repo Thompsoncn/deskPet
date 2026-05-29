@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, screen, Notification, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, screen, Notification, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const save = require('./lib/save');
@@ -37,6 +37,7 @@ if (!gotLock) {
 let petWindow = null;
 let adoptWindow = null;
 let albumWindow = null;
+let tray = null;
 let quittingAfterFlush = false;
 let tickTimer = null;
 let speechTimer = null;
@@ -109,6 +110,8 @@ function createPetWindow() {
       broadcastPetState();
     }, 200);
   });
+
+  createTray();
 }
 
 // ---------------------- 领养窗口 ----------------------
@@ -545,11 +548,16 @@ function broadcastPetState() {
     travelStatus: cache.travel?.status || 'idle',
     travelDestination: cache.travel?.destination || null,
   });
+  updateTray();
 }
 
-// ---------------------- 右键菜单 ----------------------
+// ---------------------- 菜单（右键 + 托盘共用模板）----------------------
 
-function buildContextMenu() {
+function genderTerm(gender) {
+  return gender === 'female' ? '狗妹' : '狗子';
+}
+
+function buildMenuTemplate({ includeWindowControls = false } = {}) {
   const cache = save.getCache();
   const feedLeft = cooldownSecondsLeft(cache?.interactions?.lastFeedAt);
   const playLeft = cooldownSecondsLeft(cache?.interactions?.lastPlayAt);
@@ -584,24 +592,25 @@ function buildContextMenu() {
     },
   ];
 
+  // 托盘菜单加「找回狗狗」：窗口被拖出屏幕或旅行隐藏时的找回入口
+  if (includeWindowControls) {
+    items.unshift({ type: 'separator' });
+    items.unshift({ label: '找回狗狗', click: () => recenterPetWindow() });
+  }
+
   if (travel.isDev()) {
     items.push({ type: 'separator' });
-    items.push({
-      label: '[DEV] 立刻去旅行',
-      enabled: !traveling,
-      click: () => startTravel(),
-    });
-    items.push({
-      label: '[DEV] 强制结束旅行（救援）',
-      enabled: !!traveling,
-      click: () => forceEndTravel(),
-    });
+    items.push({ label: '[DEV] 立刻去旅行', enabled: !traveling, click: () => startTravel() });
+    items.push({ label: '[DEV] 强制结束旅行（救援）', enabled: !!traveling, click: () => forceEndTravel() });
   }
 
   items.push({ type: 'separator' });
   items.push({ label: '退出', click: () => app.quit() });
+  return items;
+}
 
-  return Menu.buildFromTemplate(items);
+function buildContextMenu() {
+  return Menu.buildFromTemplate(buildMenuTemplate());
 }
 
 ipcMain.on('show-context-menu', (event) => {
@@ -609,6 +618,49 @@ ipcMain.on('show-context-menu', (event) => {
   if (!win) return;
   buildContextMenu().popup({ window: win });
 });
+
+// ---------------------- 托盘 ----------------------
+
+function createTray() {
+  if (tray) return;
+  let img = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png'));
+  if (!img.isEmpty()) img = img.resize({ width: 18, height: 18 });
+  tray = new Tray(img);
+  updateTray();
+  // 单击托盘 = 找回狗狗（窗口可能被拖丢或在旅行中隐藏）
+  tray.on('click', () => recenterPetWindow());
+}
+
+function updateTray() {
+  if (!tray) return;
+  const cache = save.getCache();
+  const name = cache?.dog?.name || '狗狗';
+  const traveling = cache?.travel?.status && cache.travel.status !== 'idle';
+  if (traveling) {
+    const dest = travel.findDestination(cache.travel.destination);
+    tray.setToolTip(`deskPet · ${name} 正在${dest?.name || '远方'}旅行中`);
+  } else {
+    tray.setToolTip(`deskPet · ${name}（${genderTerm(cache?.dog?.gender)}）`);
+  }
+  tray.setContextMenu(Menu.buildFromTemplate(buildMenuTemplate({ includeWindowControls: true })));
+}
+
+function recenterPetWindow() {
+  if (!petWindow) return;
+  const { workArea } = screen.getPrimaryDisplay();
+  const x = workArea.x + workArea.width - PET_WIN_WIDTH - 32;
+  const y = workArea.y + workArea.height - PET_WIN_HEIGHT - 32;
+  petWindow.setPosition(x, y);
+  petWindow.show();
+  petWindow.focus();
+}
+
+function destroyTray() {
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+}
 
 // ---------------------- 数据 IPC ----------------------
 
@@ -711,6 +763,10 @@ app.on('before-quit', (event) => {
     quittingAfterFlush = true;
     app.quit();
   });
+});
+
+app.on('will-quit', () => {
+  destroyTray();
 });
 
 app.on('window-all-closed', () => {
